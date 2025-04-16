@@ -1,8 +1,10 @@
 const express = require('express');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
+const axios = require('axios');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
-
 const BASE_URL = 'https://anime1.me';
 
 app.use((req, res, next) => {
@@ -10,7 +12,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// ✅ 動態執行 JS 解析影片網址
 app.get('/api/resolve', async (req, res) => {
   const url = req.query.url;
   if (!url || !url.startsWith(BASE_URL)) {
@@ -19,8 +20,9 @@ app.get('/api/resolve', async (req, res) => {
 
   try {
     const browser = await puppeteer.launch({
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      headless: 'new'
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless
     });
 
     const page = await browser.newPage();
@@ -31,7 +33,6 @@ app.get('/api/resolve', async (req, res) => {
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 0 });
 
     const result = await page.evaluate(() => {
-      // 抓出 video[data-apireq]
       const video = document.querySelector('video[data-apireq]');
       if (video) {
         const raw = video.getAttribute('data-apireq');
@@ -39,7 +40,6 @@ app.get('/api/resolve', async (req, res) => {
         return { apireq: JSON.parse(decoded), tserver: video.getAttribute('data-tserver') };
       }
 
-      // fallback: 抓 script 裡的 mp4
       const scripts = Array.from(document.querySelectorAll('script')).map(s => s.innerText);
       for (let script of scripts) {
         const match = script.match(/https:\/\/[^"']+\.anime1\.me[^"']+\.mp4/);
@@ -51,9 +51,7 @@ app.get('/api/resolve', async (req, res) => {
 
     await browser.close();
 
-    // 若是 apireq 格式，就用原站 API 再補請求
     if (result.apireq) {
-      const axios = require('axios');
       const apiRes = await axios.post(`${BASE_URL}/api`, result.apireq, {
         headers: { 'Referer': url }
       });
@@ -71,9 +69,9 @@ app.get('/api/resolve', async (req, res) => {
 });
 
 app.get('/', (_, res) => {
-  res.send('✅ Anime1 Puppeteer Proxy 正常運作');
+  res.send('✅ Anime1 Fast Puppeteer Proxy Ready');
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ Anime1 Puppeteer Proxy 運行中 http://localhost:${PORT}`);
+  console.log(`✅ Anime1 Fast Proxy running at http://localhost:${PORT}`);
 });
