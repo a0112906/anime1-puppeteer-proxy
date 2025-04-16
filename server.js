@@ -12,17 +12,23 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/health', (_, res) => {
+  res.status(200).send('OK');
+});
+
 app.get('/api/resolve', async (req, res) => {
   const url = req.query.url;
   if (!url || !url.startsWith(BASE_URL)) {
     return res.status(400).json({ error: '請提供 anime1.me 單集網址' });
   }
 
+  let browser;
   try {
-    const browser = await puppeteer.launch({
-      args: chromium.args,
+    browser = await puppeteer.launch({
+      args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
       executablePath: await chromium.executablePath(),
-      headless: chromium.headless
+      headless: chromium.headless,
+      timeout: 15000
     });
 
     const page = await browser.newPage();
@@ -30,7 +36,8 @@ app.get('/api/resolve', async (req, res) => {
       'referer': BASE_URL,
       'user-agent': 'Mozilla/5.0'
     });
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 0 });
+
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
     const result = await page.evaluate(() => {
       const video = document.querySelector('video[data-apireq]');
@@ -62,16 +69,17 @@ app.get('/api/resolve', async (req, res) => {
       return res.json({ video: result.mp4 });
     }
 
-    return res.status(404).json({ error: '無法擷取影片連結' });
+    return res.status(404).json({ error: '找不到影片連結' });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    if (browser) await browser.close();
+    return res.status(504).json({ error: 'Puppeteer timeout or launch error' });
   }
 });
 
 app.get('/', (_, res) => {
-  res.send('✅ Anime1 Fast Puppeteer Proxy Ready');
+  res.send('✅ Anime1 Puppeteer API v2 Ready');
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ Anime1 Fast Proxy running at http://localhost:${PORT}`);
+  console.log(`✅ Server running on http://localhost:${PORT}`);
 });
