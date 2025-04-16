@@ -22,13 +22,11 @@ app.get('/api/resolve', async (req, res) => {
     return res.status(400).json({ error: '請提供 anime1.me 單集網址' });
   }
 
-  let browser;
   try {
-    browser = await puppeteer.launch({
-      args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    const browser = await puppeteer.launch({
+      args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox'],
       executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-      timeout: 15000
+      headless: chromium.headless
     });
 
     const page = await browser.newPage();
@@ -37,7 +35,18 @@ app.get('/api/resolve', async (req, res) => {
       'user-agent': 'Mozilla/5.0'
     });
 
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    const success = await page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    }).then(() => true).catch(err => {
+      console.error('Timeout or error loading page:', err.message);
+      return false;
+    });
+
+    if (!success) {
+      await browser.close();
+      return res.status(504).json({ error: '載入動畫頁面逾時，請稍後重試' });
+    }
 
     const result = await page.evaluate(() => {
       const video = document.querySelector('video[data-apireq]');
@@ -51,6 +60,9 @@ app.get('/api/resolve', async (req, res) => {
       for (let script of scripts) {
         const match = script.match(/https:\/\/[^"']+\.anime1\.me[^"']+\.mp4/);
         if (match && match[0]) return { mp4: match[0] };
+
+        const iframeMatch = script.match(/https:\/\/ani\.gamer\.com\.tw\/animeVideo\.php\?sn=\d+/);
+        if (iframeMatch && iframeMatch[0]) return { iframe: iframeMatch[0] };
       }
 
       return {};
@@ -69,17 +81,16 @@ app.get('/api/resolve', async (req, res) => {
       return res.json({ video: result.mp4 });
     }
 
-    return res.status(404).json({ error: '找不到影片連結' });
+    if (result.iframe) {
+      return res.json({ iframe: result.iframe });
+    }
+
+    return res.status(404).json({ error: '找不到影片連結或 iframe' });
   } catch (err) {
-    if (browser) await browser.close();
-    return res.status(504).json({ error: 'Puppeteer timeout or launch error' });
+    return res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/', (_, res) => {
-  res.send('✅ Anime1 Puppeteer API v2 Ready');
-});
-
 app.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
+  console.log(`✅ Anime1 Puppeteer Proxy running at http://localhost:${PORT}`);
 });
